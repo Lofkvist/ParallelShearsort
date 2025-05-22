@@ -1,5 +1,5 @@
 CC = mpicc
-CFLAGS = -O2 -Wall
+CFLAGS = -O3 -Wall
 LDFLAGS = -lm
 
 TARGET = shearsort

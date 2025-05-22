@@ -23,13 +23,13 @@ void shearsort(int *matrix, int side_len);
 // Shearsort algorithm
 void shearsort_par(Rows_t* rows, int side_len);
 
-int distribute_from_root(int* global_array, int side_len, Rows_t** my_rows);
+int distribute_from_root(int* global_matrix, int side_len, Rows_t** my_rows);
 
 // Transpose the distributed matrix
 void transpose_distributed_matrix(Rows_t *local_rows, int side_len);
 
 // Gather all data to root
-void gather_to_root(int *global_array, int side_len, Rows_t *my_rows);
+void gather_to_root(int *global_matrix, int side_len, Rows_t *my_rows);
 
 // Sort a single column in ascending order
 void sort_column(int *matrix, int side_len, int col_idx);
