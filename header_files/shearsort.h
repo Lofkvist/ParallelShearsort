@@ -17,8 +17,10 @@ typedef struct {
 // Read matrix from file
 void read_file(char *file_name, int **matrix, int *side_len);
 
+int distribute_from_root_block(int *global_array, int side_len, Rows_t **my_rows);
+
 // Shearsort algorithm
-void shearsort(int *matrix, int side_len);
+void shearsort(Rows_t *local_rows, int side_len);
 
 // Shearsort algorithm
 void shearsort_par(Rows_t* rows, int side_len);

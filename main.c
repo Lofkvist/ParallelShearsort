@@ -57,10 +57,11 @@ int main(int argc, char *argv[]) {
 
 	// Each proc is assigned an array of Row_t
 	Rows_t *my_rows;
-	distribute_from_root(global_matrix, side_len, &my_rows);
+	//distribute_from_root(global_matrix, side_len, &my_rows);
+    distribute_from_root_block(global_matrix, side_len, &my_rows);
 
 	// Perform distributed transpose
-	transpose_distributed_matrix(my_rows, side_len);
+	shearsort(my_rows, side_len);
 
 	// Gather results back to root
 	gather_to_root(global_matrix, side_len, my_rows);

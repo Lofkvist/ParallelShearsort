@@ -36,32 +36,70 @@ void gather_to_root(int *global_array, int side_len, Rows_t *my_rows) {
 	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 
-	int *send_buffer = my_rows->rows; // Use rows as the buffer
+	// Determine rows per process (block distribution)
+	int base_rows = side_len / comm_size;
+	int remainder = side_len % comm_size;
+	int start_row = my_rank * base_rows + (my_rank < remainder ? my_rank : remainder);
+	int local_row_count = base_rows + (my_rank < remainder ? 1 : 0);
 
 	if (my_rank == 0) {
-		// Root process receives rows from all processes (including
-		// itself)
-		for (int i = 0, count = 0; i < side_len; i++) {
-			int source = i % comm_size;
-			if (source == 0) {
-				// Copy directly from own buffer
-				memcpy(&global_array[i * side_len], &send_buffer[(count++) * side_len],
-				       side_len * sizeof(int));
+		// Root process receives blocks from all ranks
+		memcpy(&global_array[start_row * side_len], my_rows->rows,
+		       local_row_count * side_len * sizeof(int));
+
+		for (int rank = 1; rank < comm_size; rank++) {
+			int r_base = side_len / comm_size;
+			int r_extra = rank < remainder ? 1 : 0;
+			int r_count = r_base + r_extra;
+			int r_start = rank * r_base + (rank < remainder ? rank : remainder);
+
+			MPI_Recv(&global_array[r_start * side_len], r_count * side_len, MPI_INT, rank, 0,
+			         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		}
+	} else {
+		// Non-root sends its entire block
+		MPI_Send(my_rows->rows, local_row_count * side_len, MPI_INT, 0, 0, MPI_COMM_WORLD);
+	}
+}
+
+int distribute_from_root_block(int *global_array, int side_len, Rows_t **my_rows) {
+	int my_rank, comm_size;
+	MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+
+	// Determine rows per process (block distribution)
+	int base_rows = side_len / comm_size;
+	int remainder = side_len % comm_size;
+	int start_row = my_rank * base_rows + (my_rank < remainder ? my_rank : remainder);
+	int local_row_count = base_rows + (my_rank < remainder ? 1 : 0);
+
+	// Allocate Rows_t
+	*my_rows = malloc(sizeof(Rows_t));
+	(*my_rows)->row_count = local_row_count;
+	int *recv_buffer = malloc(local_row_count * side_len * sizeof(int));
+	(*my_rows)->rows = recv_buffer;
+
+	if (my_rank == 0) {
+		for (int rank = 0; rank < comm_size; rank++) {
+			int r_base = side_len / comm_size;
+			int r_extra = rank < remainder ? 1 : 0;
+			int r_count = r_base + r_extra;
+			int r_start = rank * r_base + (rank < remainder ? rank : remainder);
+
+			if (rank == 0) {
+				memcpy(recv_buffer, &global_array[r_start * side_len],
+				       r_count * side_len * sizeof(int));
 			} else {
-				// Receive row from other process
-				MPI_Recv(&global_array[i * side_len], side_len, MPI_INT, source, i, MPI_COMM_WORLD,
-				         MPI_STATUS_IGNORE);
+				MPI_Send(&global_array[r_start * side_len], r_count * side_len, MPI_INT, rank, 0,
+				         MPI_COMM_WORLD);
 			}
 		}
 	} else {
-		// Non-root processes send their rows
-		for (int i = 0, count = 0; i < side_len; i++) {
-			if (i % comm_size == my_rank) {
-				MPI_Send(&send_buffer[count * side_len], side_len, MPI_INT, 0, i, MPI_COMM_WORLD);
-				count++;
-			}
-		}
+		MPI_Recv(recv_buffer, local_row_count * side_len, MPI_INT, 0, 0, MPI_COMM_WORLD,
+		         MPI_STATUS_IGNORE);
 	}
+
+	return local_row_count * side_len;
 }
 
 int distribute_from_root(int *global_array, int side_len, Rows_t **my_rows) {
@@ -111,26 +149,47 @@ int distribute_from_root(int *global_array, int side_len, Rows_t **my_rows) {
 	return local_row_count * side_len;
 }
 
-void shearsort(int *matrix, int side_len) {
-	int d = (int)ceil(log2(side_len * side_len));
-	int k, i;
-
-	for (k = 0; k < d + 1; k++) {
-		// Sort rows
-		for (i = 0; i < side_len; i++) {
-			int *row_start = &matrix[i * side_len];
-			if (i % 2 == 0) {
-				qsort(row_start, side_len, sizeof(int), compare_asce);
-			} else {
-				qsort(row_start, side_len, sizeof(int), compare_desc);
-			}
-		}
-
-		for (i = 0; i < side_len; i++) {
-			sort_column(matrix, side_len, i);
-		}
-	}
+void shearsort(Rows_t *local_rows, int side_len) {
+    int d = (int)ceil(log2(side_len * side_len));
+    int my_rank, comm_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+    
+    // Calculate global starting row index for this process
+    int base = side_len / comm_size;
+    int remainder = side_len % comm_size;
+    int start_row = my_rank * base + (my_rank < remainder ? my_rank : remainder);
+    
+    for (int k = 0; k < d + 1; k++) {
+        // Sort rows with snake pattern
+        for (int i = 0; i < local_rows->row_count; i++) {
+            int global_row = start_row + i;
+            int *row_start = &local_rows->rows[i * side_len];
+            if (global_row % 2 == 0) {
+                qsort(row_start, side_len, sizeof(int), compare_asce);
+            } else {
+                qsort(row_start, side_len, sizeof(int), compare_desc);
+            }
+        }
+        
+        // Transpose distributed matrix
+        transpose_distributed_matrix(local_rows, side_len);
+        
+        // After transpose, check what the actual row width should be
+        // This might not be side_len anymore!
+        int current_row_width = side_len; // You may need to calculate this differently
+        
+        for (int i = 0; i < local_rows->row_count; i++) {
+            int *row_start = &local_rows->rows[i * current_row_width];
+            qsort(row_start, current_row_width, sizeof(int), compare_asce);
+        }
+        
+        // Transpose back
+        transpose_distributed_matrix(local_rows, side_len);
+        
+    }
 }
+
 
 void transpose_distributed_matrix(Rows_t *local_rows, int side_len) {
 	int my_rank, comm_size;
@@ -164,22 +223,25 @@ void transpose_distributed_matrix(Rows_t *local_rows, int side_len) {
 	}
 	memcpy(recv_displs, send_displs, sizeof(send_displs)); // Alltoallv symmetry
 
-	int current_idx[comm_size];
-	memcpy(current_idx, send_displs, sizeof(send_displs));
+	// Fill send buffer - pack data COLUMN-WISE by destination process
+	int send_idx[comm_size];
+	memcpy(send_idx, send_displs, sizeof(send_displs));
 
-	// Fill send buffer
-	for (i = 0; i < local_row_count; i++) {
-		for (j = 0; j < side_len; j++) {
-			int col_owner = j % comm_size;
-			if (col_owner == my_rank)
-				continue;
+	int remainder = side_len % comm_size;
 
-			int val = local_rows->rows[i * side_len + j];
-			int target_index = current_idx[col_owner]++;
-			send_buffer[target_index] = val;
+	for (int col = 0; col < side_len; col++) {
+		int dest;
+		if (col < (base + 1) * remainder)
+			dest = col / (base + 1);
+		else
+			dest = (col - remainder) / base;
 
-			printf("[Rank %d] Will send value %d at row %d, col %d (global) to rank %d\n", my_rank,
-			       val, my_rank + i * comm_size, j, col_owner);
+		if (dest == my_rank)
+			continue;
+
+		for (int row = 0; row < local_row_count; row++) {
+			int value = local_rows->rows[row * side_len + col];
+			send_buffer[send_idx[dest]++] = value;
 		}
 	}
 
@@ -187,78 +249,65 @@ void transpose_distributed_matrix(Rows_t *local_rows, int side_len) {
 	MPI_Alltoallv(send_buffer, send_counts, send_displs, MPI_INT, recv_buffer, recv_counts,
 	              recv_displs, MPI_INT, MPI_COMM_WORLD);
 
-	// Print what was received
-	printf("[Rank %d] Received values:", my_rank);
-	for (i = 0; i < recv_count; i++) {
-		printf(" %d", recv_buffer[i]);
-	}
-	printf("\n");
+	// Interleave received data by row
+	int *temp_buffer = malloc(recv_count * sizeof(int));
+	int temp_idx = 0;
 
-	for (int i = 0; i < local_row_count; i++) {
-		for (int j = 0; j < side_len; j++) {
-			int global_row = my_rank + i * comm_size;
-			int col_owner = j % comm_size;
-			int j_local = (j - col_owner) / comm_size;
-
-			if (col_owner != my_rank)
-				continue; // Only handle internal elements
-
-			if ((j - my_rank) % comm_size == 0 && i == j_local) {
-				// Diagonal element (i == j_local): no action needed or could print/verify
+	for (int row = 0; row < local_row_count; row++) {
+		for (int sender = 0; sender < comm_size; sender++) {
+			if (sender == my_rank)
 				continue;
-			}
 
-			if ((j - my_rank) % comm_size != 0 || i >= j_local)
-				continue; // Avoid duplicate lower-triangle swaps
+			int elems_per_row = recv_counts[sender] / local_row_count;
+			int offset = recv_displs[sender] + row * elems_per_row;
 
-			int idx1 = i * side_len + j;
-			int idx2 = j_local * side_len + global_row;
-
-			printf("[Rank %d] Swapping (%d,%d)<->(%d,%d): %d <-> %d\n", my_rank, global_row, j,
-			       my_rank + j_local * comm_size, global_row, local_rows->rows[idx1],
-			       local_rows->rows[idx2]);
-
-			int tmp = local_rows->rows[idx1];
-			local_rows->rows[idx1] = local_rows->rows[idx2];
-			local_rows->rows[idx2] = tmp;
+			memcpy(&temp_buffer[temp_idx], &recv_buffer[offset], elems_per_row * sizeof(int));
+			temp_idx += elems_per_row;
 		}
 	}
 
-	// Handle the first my_rank items
-    int rev = 0;
-    int col = 1 + my_rank;
-    int rec_idx = 0;
+	memcpy(recv_buffer, temp_buffer, recv_count * sizeof(int));
+	free(temp_buffer);
 
-    // Pupulate first my_rank items in rows
-    for (i = 0; i < my_rank; i++) {
-        for (j = 0; j < local_row_count; j++) {
-            int idx = j * side_len + col;
-            local_rows->rows[idx] = recv_buffer[rec_idx++];
-        }
+	// Transpose within the local block (swap elements across the diagonal)
+	// Only swap within the square block owned by this process
+	int base_rows = side_len / comm_size;
+	int start_row = my_rank * base_rows + (my_rank < remainder ? my_rank : remainder);
 
-        col += comm_size;
+	// Transpose within the local block, considering the global positions
+	for (int i = 0; i < local_row_count; i++) {
+		for (int j = i + 1; j < local_row_count; j++) {
+			int global_i = start_row + i;
+			int global_j = start_row + j;
 
-        if (col >= side_len) {
-            rev++;
-            col = 1 + my_rank + rev;
-        }
-    }
+			// Transpose only if the full (i,j) and (j,i) are in the local block
+			int idx1 = i * side_len + global_j;
+			int idx2 = j * side_len + global_i;
 
-    // Rest of row updates
-    col = my_rank+1;
-    for (i = 0; i < recv_count/local_row_count && rec_idx < recv_count; i++) {
-        for (j = 0; j < local_row_count && rec_idx < recv_count; j++) {
-            int idx = j * side_len + col;
-            local_rows->rows[idx] = recv_buffer[rec_idx++];
-        }
+			int temp = local_rows->rows[idx1];
+			local_rows->rows[idx1] = local_rows->rows[idx2];
+			local_rows->rows[idx2] = temp;
+		}
+	}
 
-        col += comm_size;
+	// Add the recieved elements in the row
+	int counter = 0;
+	for (int i = 0; i < local_row_count; i++) {
+		int diag_col = start_row + i;
+		int local_diag_idx = i * side_len + diag_col;
 
-        if (col >= side_len) {
-            rev++;
-            col = 1 + my_rank + rev;
-        }
-    }
+		for (int j = 0; j < side_len; j++) {
+			// Skip elements before and after the diagonal in the local square block
+			if (j >= start_row && j < start_row + local_row_count) {
+				if (j >= diag_col - i && j <= diag_col + (local_row_count - 1 - i)) {
+					continue; // skip elements surrounding the diagonal
+				}
+			}
+
+			int local_idx = i * side_len + j;
+			local_rows->rows[local_idx] = recv_buffer[counter++];
+		}
+	}
 
 	free(send_buffer);
 	free(recv_buffer);
