@@ -1,3 +1,8 @@
+// shearsort.c
+// Parallel shear sort and helper functions using MPI
+// Author: Carl Löfkvist
+// Date: 2024-05-26
+
 #include "../header_files/shearsort.h"
 
 static row_dist_t get_row_distribution(int side_len, int rank, int comm_size) {
@@ -23,7 +28,7 @@ void shearsort(Rows_t *local_rows, int side_len) {
 	row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
 	int k, i, global_row;
-    int* row_start;
+	int *row_start;
 	const int d = (int)ceil(log2(side_len * side_len));
 	for (k = 0; k < d + 1; k++) {
 
@@ -58,7 +63,7 @@ void read_file(char *file_name, int **matrix, int *side_len) {
 	FILE *file = fopen(file_name, "r");
 	if (file == NULL) {
 		perror("Error opening file");
-        fclose(file);
+		fclose(file);
 		MPI_Abort(MPI_COMM_WORLD, 1);
 	}
 
@@ -149,16 +154,16 @@ void transpose_square_matrix(Rows_t *local_rows, int side_len) {
 	int send_counts[mpi.size], send_displs[mpi.size];
 	send_displs[0] = 0;
 	int total_send = 0;
-	int i, j;
+	int i, rank, col, row;
 
-	for (i = 0; i < mpi.size; i++) {
-		send_counts[i] = dist.row_count * (dist.base + dist.remainder);
-		send_displs[i] = send_displs[i - 1] + send_counts[i - 1];
-		total_send += send_counts[i];
+	for (rank = 0; rank < mpi.size; rank++) {
+		send_counts[rank] = dist.row_count * (dist.base + dist.remainder);
+		send_displs[rank] = send_displs[rank - 1] + send_counts[rank - 1];
+		total_send += send_counts[rank];
 	}
-	send_counts[i] = 0;
+	send_counts[mpi.rank] = 0;
 
-    // Send/Recieve buffers
+	// Send/Recieve buffers
 	int *send_buffer = malloc(total_send * sizeof(int));
 	int *recv_buffer = malloc(total_send * sizeof(int));
 
@@ -168,12 +173,12 @@ void transpose_square_matrix(Rows_t *local_rows, int side_len) {
 	memcpy(send_idx, send_displs, mpi.size * sizeof(int));
 
 	// Fill send buffer
-	for (i = 0; i < side_len; i++) {
-		int dest = (i < (dist.base + 1) * dist.remainder) ? i / (dist.base + 1)
-		                                                  : (i - dist.remainder) / dist.base;
+	for (col = 0; col < side_len; col++) {
+		int dest = (col < (dist.base + 1) * dist.remainder) ? col / (dist.base + 1)
+		                                                  : (col - dist.remainder) / dist.base;
 		if (dest != mpi.rank) {
-			for (j = 0; j < dist.row_count; j++) {
-				send_buffer[send_idx[dest]++] = local_rows->rows[j * side_len + i];
+			for (row = 0; row < dist.row_count; row++) {
+				send_buffer[send_idx[dest]++] = local_rows->rows[row * side_len + col];
 			}
 		}
 	}
@@ -185,44 +190,44 @@ void transpose_square_matrix(Rows_t *local_rows, int side_len) {
 	// Interleave received data by row
 	int *temp_buffer = malloc(total_send * sizeof(int));
 	int temp_idx = 0;
-	int row, sender, elems_per_row, offset;
+	int elems_per_row, offset;
 	for (row = 0; row < dist.row_count; row++) {
-		for (sender = 0; sender < mpi.size; sender++) {
-			if (sender != mpi.rank) {
-				elems_per_row = send_counts[sender] / dist.row_count;
-				offset = send_displs[sender] + row * elems_per_row;
+		for (rank = 0; rank < mpi.size; rank++) {
+			if (rank != mpi.rank) {
+				elems_per_row = send_counts[rank] / dist.row_count;
+				offset = send_displs[rank] + row * elems_per_row;
 				memcpy(&temp_buffer[temp_idx], &recv_buffer[offset], elems_per_row * sizeof(int));
 				temp_idx += elems_per_row;
 			}
 		}
 	}
 
-	// Exchange local element within proc
+	// Perform transposition
+	int counter = 0;
 	int global_i, global_j, idx1, idx2, temp;
-	for (i = 0; i < dist.row_count; i++) {
-		global_i = dist.start_row + i;
-		for (j = i + 1; j < dist.row_count; j++) {
-			global_j = dist.start_row + j;
-			idx1 = i * side_len + global_j;
-			idx2 = j * side_len + global_i;
+	for (row = 0; row < dist.row_count; row++) {
+		// === Exchange elements locally ===
+        global_i = dist.start_row + row;
+		for (i = row + 1; i < dist.row_count; i++) {
+			global_j = dist.start_row + i;
+			idx1 = row * side_len + global_j;
+			idx2 = i * side_len + global_i;
 
 			temp = local_rows->rows[idx1];
 			local_rows->rows[idx1] = local_rows->rows[idx2];
 			local_rows->rows[idx2] = temp;
 		}
-	}
 
-	// Place received elements
-	int counter = 0;
-	for (i = 0; i < dist.row_count; i++) {
-		for (j = 0; j < side_len; j++) {
-			if (j >= dist.start_row && j < dist.start_row + dist.row_count) {
-                // Skip these, already transposed within proc
+        // === Place recieved elements ===
+		for (i = 0; i < side_len; i++) {
+			if (i >= dist.start_row && i < dist.start_row + dist.row_count) {
+				// Skip these, already transposed within proc
 				continue;
 			}
-			local_rows->rows[i * side_len + j] = temp_buffer[counter++];
+			local_rows->rows[row * side_len + i] = temp_buffer[counter++];
 		}
 	}
+
 	free(send_buffer);
 	free(temp_buffer);
 	free(recv_buffer);
@@ -241,7 +246,6 @@ void print_matrix(int *matrix, int side_len) {
 
 int compare_asce(const void *a, const void *b) { return (*(int *)a - *(int *)b); }
 int compare_desc(const void *a, const void *b) { return (*(int *)b - *(int *)a); }
-
 
 int is_shearsorted(int *matrix, int side_len) {
 	int i, j;

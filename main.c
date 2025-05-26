@@ -1,3 +1,8 @@
+// main.c
+// Main function for parallel shear sort using MPI
+// Author: Carl Löfkvist
+// Date: 2024-05-26
+
 #include "header_files/shearsort.h"
 #include <math.h>
 #include <mpi.h>
