@@ -1,65 +1,53 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def plot_strong_scalability(filename):
+def plot_strong_scalability(filename, ax):
     df = pd.read_csv(filename)
-    # Baseline time = time at 1 core
-    t1 = df.loc[df['Cores'] == 1, 'ExecutionTime(seconds)'].values[0]
+    df = df.sort_values('procs')
 
-    df['Speedup'] = t1 / df['ExecutionTime(seconds)']
-    df['Efficiency'] = df['Speedup'] / df['Cores']
+    t1 = df.loc[df['procs'] == 1, 'time'].values[0]
+    df['speedup'] = t1 / df['time']
 
-    fig, ax1 = plt.subplots()
+    ax.plot(df['procs'], df['speedup'], marker='o', label='Measured Speedup', color='tab:blue')
+    ax.plot(df['procs'], df['procs'], linestyle='--', label='Ideal Speedup', color='gray')  # Ideal line
 
-    ax1.plot(df['Cores'], df['Speedup'], marker='o', label='Speedup')
-    ax1.set_xlabel('Number of Cores')
-    ax1.set_ylabel('Speedup', color='tab:blue')
-    ax1.tick_params(axis='y', labelcolor='tab:blue')
-    ax1.set_xticks(df['Cores'])
+    ax.set_xlabel('Number of Processes', color='black')
+    ax.set_ylabel('Speedup', color='black')
+    ax.set_title('Strong Scalability', color='black')
+    ax.tick_params(axis='x', labelcolor='black')
+    ax.tick_params(axis='y', labelcolor='black')
+    ax.set_xticks(df['procs'])
+    ax.legend()
 
-    ax2 = ax1.twinx()
-    ax2.plot(df['Cores'], df['Efficiency'], marker='x', color='tab:red', label='Efficiency')
-    ax2.set_ylabel('Efficiency', color='tab:red')
-    ax2.tick_params(axis='y', labelcolor='tab:red')
+    plt.tight_layout()
 
-    plt.title('Strong Scalability')
-    fig.tight_layout()
-    plt.show()
-
-def plot_weak_scalability(filename):
+def plot_weak_scalability(filename,ax):
     df = pd.read_csv(filename)
-    # Baseline time at 1 core
-    t1 = df.loc[df['Cores'] == 1, 'ExecutionTime(seconds)'].values[0]
+    df = df.sort_values('procs')
 
-    # Speedup = t1 / current time
-    df['Speedup'] = t1 / df['ExecutionTime(seconds)']
-    # Efficiency = Speedup / sqrt(number_of_cores) or just speedup / cores (common varies)
-    # But weak scaling efficiency is often just (time at 1 core) / (time at n cores)
-    df['Efficiency'] = df['Speedup'] / df['Cores']
+    t1 = df.loc[df['procs'] == 1, 'time'].values[0]
+    df['efficiency'] = t1 / df['time']
 
-    fig, ax1 = plt.subplots()
+    ax.plot(df['procs'], df['efficiency'], marker='x', color='tab:red', label='Efficiency')
 
-    ax1.plot(df['Cores'], df['Speedup'], marker='o', label='Speedup')
-    ax1.set_xlabel('Number of Cores')
-    ax1.set_ylabel('Speedup', color='tab:blue')
-    ax1.tick_params(axis='y', labelcolor='tab:blue')
-    ax1.set_xticks(df['Cores'])
+    ax.set_xlabel('Number of Processes', color='black')
+    ax.set_ylabel('Efficiency', color='black')
+    ax.set_title('Weak Scalability', color='black')
+    ax.set_ylim(0, 1.05)
+    ax.tick_params(axis='x', labelcolor='black')
+    ax.tick_params(axis='y', labelcolor='black')
+    ax.set_xticks(df['procs'])
+    ax.legend()
 
-    ax2 = ax1.twinx()
-    ax2.plot(df['Cores'], df['Efficiency'], marker='x', color='tab:red', label='Efficiency')
-    ax2.set_ylabel('Efficiency', color='tab:red')
-    ax2.tick_params(axis='y', labelcolor='tab:red')
-
-    plt.title('Weak Scalability')
-    fig.tight_layout()
-    plt.show()
+    plt.tight_layout()
 
 if __name__ == "__main__":
     strong_file = 'strong_scalability_results.txt'
     weak_file = 'weak_scalability_results.txt'
+    
+    fig1, ax1 = plt.subplots()
+    plot_strong_scalability(strong_file, ax1)
 
-    print("Plotting strong scalability...")
-    plot_strong_scalability(strong_file)
-
-    print("Plotting weak scalability...")
-    plot_weak_scalability(weak_file)
+    fig2, ax2 = plt.subplots()
+    plot_weak_scalability(weak_file,ax2)
+    plt.show()

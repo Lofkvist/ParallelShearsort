@@ -21,7 +21,7 @@ mpi_info_t get_mpi_info() {
 	return info;
 }
 
-void shearsort(Rows_t *local_rows, int side_len) {
+void shearsort(int *local_rows, int side_len) {
 	mpi_info_t mpi = get_mpi_info();
 
 	// Instead of 4 calculations, just:
@@ -35,7 +35,7 @@ void shearsort(Rows_t *local_rows, int side_len) {
 		// ====== Sort Rows ======
 		for (i = 0; i < dist.row_count; i++) {
 			global_row = dist.start_row + i;
-			row_start = &local_rows->rows[i * side_len];
+			row_start = &local_rows[i * side_len];
 			if (global_row % 2 == 0) {
 				qsort(row_start, side_len, sizeof(int), compare_asce);
 			} else {
@@ -49,7 +49,7 @@ void shearsort(Rows_t *local_rows, int side_len) {
 
 		// Sort Columns
 		for (i = 0; i < dist.row_count; i++) {
-			row_start = &local_rows->rows[i * side_len];
+			row_start = &local_rows[i * side_len];
 			qsort(row_start, side_len, sizeof(int), compare_asce);
 		}
 
@@ -91,14 +91,13 @@ void read_file(char *file_name, int **matrix, int *side_len) {
 	fclose(file);
 }
 
-// Gather rows of all processes to root process
-void gather_rows(int *global_array, int side_len, Rows_t *my_rows) {
+void gather_rows(int *global_array, int side_len, int *my_rows) {
     mpi_info_t mpi = get_mpi_info();
     row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
     if (mpi.rank == 0) {
         // Copy own rows into global array
-        memcpy(&global_array[dist.start_row * side_len], my_rows->rows,
+        memcpy(&global_array[dist.start_row * side_len], my_rows,
                dist.row_count * side_len * sizeof(int));
 
         // Receive rows from other processes
@@ -121,33 +120,25 @@ void gather_rows(int *global_array, int side_len, Rows_t *my_rows) {
     } else {
         // Non-root processes send their block
         int send_count = dist.row_count * side_len;
-        MPI_Send(my_rows->rows, send_count, MPI_INT, 0, 0, MPI_COMM_WORLD);
+        MPI_Send(my_rows, send_count, MPI_INT, 0, 0, MPI_COMM_WORLD);
     }
 }
 
 
-// Distribute rows from root in blocks
-int distribute_rows(int *global_array, int side_len, Rows_t **my_rows) {
+int distribute_rows(int *global_array, int side_len, int **my_rows) {
     mpi_info_t mpi = get_mpi_info();
 
-    // Determine rows per process (block distribution)
     row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
     int count = dist.row_count * side_len;
-
-    // Allocate Rows_t
-    *my_rows = malloc(sizeof(Rows_t));
-    if (*my_rows == NULL) {
-        fprintf(stderr, "Rank %d: Failed to allocate Rows_t\n", mpi.rank);
-        MPI_Abort(MPI_COMM_WORLD, 1);
-    }
 
     int *recv_buffer = malloc(count * sizeof(int));
     if (recv_buffer == NULL) {
         fprintf(stderr, "Rank %d: Failed to allocate recv_buffer\n", mpi.rank);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    (*my_rows)->rows = recv_buffer;
+
+    *my_rows = recv_buffer;
 
     if (mpi.rank == 0) {
         for (int rank = 0; rank < mpi.size; rank++) {
@@ -182,98 +173,80 @@ int distribute_rows(int *global_array, int side_len, Rows_t **my_rows) {
 
 
 
-void transpose_square_matrix(Rows_t *local_rows, int side_len) {
+void transpose_square_matrix(int *local_rows, int side_len) {
 	mpi_info_t mpi = get_mpi_info();
 	row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
-	// Calculate send/recv counts
 	int send_counts[mpi.size], send_displs[mpi.size];
 	send_displs[0] = 0;
 	int total_send = 0;
-	int i, rank, col, row;
 
-    for (rank = 0; rank < mpi.size; rank++) {
-        row_dist_t rank_dist = get_row_distribution(side_len, rank, mpi.size);
-        send_counts[rank] = dist.row_count * rank_dist.row_count;
+	for (int rank = 0; rank < mpi.size; rank++) {
+		row_dist_t rank_dist = get_row_distribution(side_len, rank, mpi.size);
+		send_counts[rank] = dist.row_count * rank_dist.row_count;
+		if (rank > 0) {
+			send_displs[rank] = send_displs[rank - 1] + send_counts[rank - 1];
+		}
+		total_send += send_counts[rank];
+	}
 
-        if (rank > 0) {  // Add this check
-            send_displs[rank] = send_displs[rank - 1] + send_counts[rank - 1];
-        }
-        total_send += send_counts[rank];
-    }
-
-	// Send/Recieve buffers
 	int *send_buffer = malloc(total_send * sizeof(int));
 	int *recv_buffer = malloc(total_send * sizeof(int));
+	assert(send_buffer != NULL && recv_buffer != NULL);
 
-    assert(send_buffer != NULL && recv_buffer != NULL);
-
-
-	// send_idx[] keeps track of the current index to be populated in
-	// each
 	int send_idx[mpi.size];
 	memcpy(send_idx, send_displs, mpi.size * sizeof(int));
 
-	// Fill send buffer
-	for (col = 0; col < side_len; col++) {
+	for (int col = 0; col < side_len; col++) {
 		int dest = (col < (dist.base + 1) * dist.remainder) ? col / (dist.base + 1)
-		                                                  : (col - dist.remainder) / dist.base;
+		                                                    : (col - dist.remainder) / dist.base;
 		if (dest != mpi.rank) {
-			for (row = 0; row < dist.row_count; row++) {
-				send_buffer[send_idx[dest]++] = local_rows->rows[row * side_len + col];
+			for (int row = 0; row < dist.row_count; row++) {
+				send_buffer[send_idx[dest]++] = local_rows[row * side_len + col];
 			}
 		}
 	}
 
-	// Exchange values
-	MPI_Alltoallv(send_buffer, send_counts, send_displs, MPI_INT, recv_buffer, send_counts,
-	              send_displs, MPI_INT, MPI_COMM_WORLD);
+	MPI_Alltoallv(send_buffer, send_counts, send_displs, MPI_INT,
+	              recv_buffer, send_counts, send_displs, MPI_INT,
+	              MPI_COMM_WORLD);
 
-	// Interleave received data by row
 	int *temp_buffer = malloc(total_send * sizeof(int));
 	int temp_idx = 0;
-	int elems_per_row, offset;
-	for (row = 0; row < dist.row_count; row++) {
-		for (rank = 0; rank < mpi.size; rank++) {
+	for (int row = 0; row < dist.row_count; row++) {
+		for (int rank = 0; rank < mpi.size; rank++) {
 			if (rank != mpi.rank) {
-				elems_per_row = send_counts[rank] / dist.row_count;
-				offset = send_displs[rank] + row * elems_per_row;
+				int elems_per_row = send_counts[rank] / dist.row_count;
+				int offset = send_displs[rank] + row * elems_per_row;
 				memcpy(&temp_buffer[temp_idx], &recv_buffer[offset], elems_per_row * sizeof(int));
 				temp_idx += elems_per_row;
 			}
 		}
 	}
 
-	// Perform transposition
 	int counter = 0;
-	int global_i, global_j, idx1, idx2, temp;
-	for (row = 0; row < dist.row_count; row++) {
-		// === Exchange elements locally ===
-        global_i = dist.start_row + row;
-		for (i = row + 1; i < dist.row_count; i++) {
-			global_j = dist.start_row + i;
-			idx1 = row * side_len + global_j;
-			idx2 = i * side_len + global_i;
-
-			temp = local_rows->rows[idx1];
-			local_rows->rows[idx1] = local_rows->rows[idx2];
-			local_rows->rows[idx2] = temp;
+	for (int row = 0; row < dist.row_count; row++) {
+		int global_i = dist.start_row + row;
+		for (int i = row + 1; i < dist.row_count; i++) {
+			int global_j = dist.start_row + i;
+			int idx1 = row * side_len + global_j;
+			int idx2 = i * side_len + global_i;
+			int temp = local_rows[idx1];
+			local_rows[idx1] = local_rows[idx2];
+			local_rows[idx2] = temp;
 		}
 
-        // === Place recieved elements ===
-		for (i = 0; i < side_len; i++) {
-			if (i >= dist.start_row && i < dist.start_row + dist.row_count) {
-				// Skip these, already transposed within proc
-				continue;
-			}
-			local_rows->rows[row * side_len + i] = temp_buffer[counter++];
+		for (int i = 0; i < side_len; i++) {
+			if (i >= dist.start_row && i < dist.start_row + dist.row_count) continue;
+			local_rows[row * side_len + i] = temp_buffer[counter++];
 		}
 	}
 
 	free(send_buffer);
-	free(temp_buffer);
 	free(recv_buffer);
+	free(temp_buffer);
 }
+
 
 void print_matrix(int *matrix, int side_len) {
 	int i;

@@ -57,41 +57,31 @@ int main(int argc, char *argv[]) {
 
 	double start, end, elapsed, max_elapsed;
 
-	// Local 
-	Rows_t *local_rows;
-
+	// Local buffer
+	int *local_rows;
 	distribute_rows(global_matrix, side_len, &local_rows);
 
-	// Perform distributed transpose
+	// Perform distributed shear sort
 	start = MPI_Wtime();
 	shearsort(local_rows, side_len);
 	end = MPI_Wtime();
 	elapsed = end - start;
+
 	// Gather results back to root
 	gather_rows(global_matrix, side_len, local_rows);
-
 	MPI_Reduce(&elapsed, &max_elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
 
 	if (mpi.rank == 0) {
-		int sheadsorted = is_shearsorted(global_matrix, side_len);
-		if (sheadsorted) {
-            printf("%f\n", max_elapsed);
+		if (is_shearsorted(global_matrix, side_len)) {
+			printf("%f\n", max_elapsed);
 		} else {
 			printf("Matrix not sorted!\n");
             return 1;
-        }
-	}
-
-
-	// Clean up
-	if (local_rows) {
-		if (local_rows->rows) {
-			free(local_rows->rows);
 		}
-		free(local_rows);
 	}
-	free(global_matrix);
 
+	free(local_rows);
+	free(global_matrix);
 	MPI_Finalize();
 	return 0;
 }

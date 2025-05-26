@@ -8,7 +8,7 @@ echo "=== STRONG SCALABILITY TEST ==="
 FIXED_N=1000 # Matrix side length (N*N elements)
 CORES=(1 2 4 8 16)
 
-INPUT_FILE="inputs/input$((FIXED_N * FIXED_N)).txt"
+INPUT_FILE="../inputs/input$((FIXED_N * FIXED_N)).txt"
 OUTPUT_FILE="strong_scalability_results.txt"
 
 # Clear previous results
@@ -57,7 +57,7 @@ echo "Cores,N,Elements,ExecutionTime(seconds)" >> "$OUTPUT_FILE_WEAK"
 for cores in "${!WEAK_CONFIG[@]}"; do
   N=${WEAK_CONFIG[$cores]}
   elements=$((N * N))
-  input_file="inputs/input$elements.txt"
+  input_file="../inputs/input$elements.txt"
 
   echo "Testing weak scaling with $cores cores, N=$N (${elements} elements)..."
 

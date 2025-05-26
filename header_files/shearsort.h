@@ -1,15 +1,12 @@
-#ifndef SHEADSORT_H
-#define SHEADSORT_H
+#ifndef SHEARSORT_H
+#define SHEARSORT_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include <mpi.h>
 #include <assert.h>
-
-typedef struct {
-   int* rows;
-} Rows_t;
 
 typedef struct {
    int rank;
@@ -41,39 +38,39 @@ mpi_info_t get_mpi_info();
 * Distribute rows from global matrix to local processes
 * @param global_array The complete matrix array (only valid on root process)
 * @param side_len Side length of the square matrix
-* @param my_rows Pointer to local rows structure (allocated by function)
+* @param my_rows Pointer to local row buffer (allocated by function)
 * @return Total number of elements in local rows
 */
-int distribute_rows(int *global_array, int side_len, Rows_t **my_rows);
+int distribute_rows(int *global_array, int side_len, int **my_rows);
 
 /**
 * Sequential shearsort algorithm
-* @param local_rows Local rows structure containing process's portion of matrix
+* @param local_rows Local portion of the matrix
 * @param side_len Side length of the square matrix
 */
-void shearsort(Rows_t *local_rows, int side_len);
+void shearsort(int *local_rows, int side_len);
 
 /**
 * Parallel shearsort algorithm
-* @param rows Local rows structure containing process's portion of matrix
+* @param rows Local portion of the matrix
 * @param side_len Side length of the square matrix
 */
-void shearsort_par(Rows_t* rows, int side_len);
+void shearsort_par(int *rows, int side_len);
 
 /**
 * Transpose the distributed matrix across all processes
-* @param local_rows Local rows structure containing process's portion of matrix
+* @param local_rows Local portion of the matrix
 * @param side_len Side length of the square matrix
 */
-void transpose_square_matrix(Rows_t *local_rows, int side_len);
+void transpose_square_matrix(int *local_rows, int side_len);
 
 /**
 * Gather all distributed rows to root process
 * @param global_matrix Buffer to store complete matrix (only used on root)
 * @param side_len Side length of the square matrix
-* @param my_rows Local rows structure containing process's portion of matrix
+* @param my_rows Local portion of the matrix
 */
-void gather_rows(int *global_matrix, int side_len, Rows_t *my_rows);
+void gather_rows(int *global_matrix, int side_len, int *my_rows);
 
 /**
 * Sort a single column in ascending order
@@ -114,4 +111,4 @@ int compare_desc(const void *a, const void *b);
 */
 int is_shearsorted(int *matrix, int side_len);
 
-#endif // SHEADSORT_H
+#endif // SHEARSORT_H
