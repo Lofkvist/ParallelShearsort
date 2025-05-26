@@ -5,6 +5,7 @@
 #include <math.h>
 #include <string.h>
 #include <mpi.h>
+#include <assert.h>
 
 typedef struct {
    int* rows;

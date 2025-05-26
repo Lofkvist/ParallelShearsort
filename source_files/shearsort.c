@@ -93,58 +93,94 @@ void read_file(char *file_name, int **matrix, int *side_len) {
 
 // Gather rows of all processes to root process
 void gather_rows(int *global_array, int side_len, Rows_t *my_rows) {
-	mpi_info_t mpi = get_mpi_info();
-	row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
+    mpi_info_t mpi = get_mpi_info();
+    row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
-	int rank, r_start;
-	if (mpi.rank == 0) {
-		memcpy(&global_array[dist.start_row * side_len], my_rows->rows,
-		       dist.row_count * side_len * sizeof(int));
+    if (mpi.rank == 0) {
+        // Copy own rows into global array
+        memcpy(&global_array[dist.start_row * side_len], my_rows->rows,
+               dist.row_count * side_len * sizeof(int));
 
-		for (rank = 1; rank < mpi.size; rank++) {
-			r_start = rank * dist.base + (rank < dist.remainder ? rank : dist.remainder);
+        // Receive rows from other processes
+        for (int rank = 1; rank < mpi.size; rank++) {
+            int r_start = rank * dist.base + (rank < dist.remainder ? rank : dist.remainder);
+            int recv_count = ((rank < dist.remainder) ? dist.base + 1 : dist.base) * side_len;
 
-			MPI_Recv(&global_array[r_start * side_len], dist.row_count * side_len, MPI_INT, rank, 0,
-			         MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-		}
-	} else {
-		// Non-root sends its entire block
-		MPI_Send(my_rows->rows, dist.row_count * side_len, MPI_INT, 0, 0, MPI_COMM_WORLD);
-	}
+            MPI_Status status;
+            MPI_Recv(&global_array[r_start * side_len], recv_count, MPI_INT, rank, 0,
+                     MPI_COMM_WORLD, &status);
+
+            int actual_count;
+            MPI_Get_count(&status, MPI_INT, &actual_count);
+            if (actual_count != recv_count) {
+                fprintf(stderr, "Rank 0: MPI_Recv mismatch from rank %d! Expected %d, got %d\n",
+                        rank, recv_count, actual_count);
+                MPI_Abort(MPI_COMM_WORLD, 1);
+            }
+        }
+    } else {
+        // Non-root processes send their block
+        int send_count = dist.row_count * side_len;
+        MPI_Send(my_rows->rows, send_count, MPI_INT, 0, 0, MPI_COMM_WORLD);
+    }
 }
 
-// Distrubute rows from root in blocks
+
+// Distribute rows from root in blocks
 int distribute_rows(int *global_array, int side_len, Rows_t **my_rows) {
-	mpi_info_t mpi = get_mpi_info();
+    mpi_info_t mpi = get_mpi_info();
 
-	// Determine rows per process (block distribution)
-	row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
+    // Determine rows per process (block distribution)
+    row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
-	// Allocate Rows_t
-	*my_rows = malloc(sizeof(Rows_t));
-	int *recv_buffer = malloc(dist.row_count * side_len * sizeof(int));
-	(*my_rows)->rows = recv_buffer;
+    int count = dist.row_count * side_len;
 
-	int rank, r_start;
-	if (mpi.rank == 0) {
-		for (rank = 0; rank < mpi.size; rank++) {
-			r_start = rank * dist.base + (rank < dist.remainder ? rank : dist.remainder);
+    // Allocate Rows_t
+    *my_rows = malloc(sizeof(Rows_t));
+    if (*my_rows == NULL) {
+        fprintf(stderr, "Rank %d: Failed to allocate Rows_t\n", mpi.rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
 
-			if (rank == 0) {
-				memcpy(recv_buffer, &global_array[r_start * side_len],
-				       dist.row_count * side_len * sizeof(int));
-			} else {
-				MPI_Send(&global_array[r_start * side_len], dist.row_count * side_len, MPI_INT,
-				         rank, 0, MPI_COMM_WORLD);
-			}
-		}
-	} else {
-		MPI_Recv(recv_buffer, dist.row_count * side_len, MPI_INT, 0, 0, MPI_COMM_WORLD,
-		         MPI_STATUS_IGNORE);
-	}
+    int *recv_buffer = malloc(count * sizeof(int));
+    if (recv_buffer == NULL) {
+        fprintf(stderr, "Rank %d: Failed to allocate recv_buffer\n", mpi.rank);
+        MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+    (*my_rows)->rows = recv_buffer;
 
-	return dist.row_count * side_len;
+    if (mpi.rank == 0) {
+        for (int rank = 0; rank < mpi.size; rank++) {
+            int r_start = rank * dist.base + (rank < dist.remainder ? rank : dist.remainder);
+            int send_rows = (rank < dist.remainder) ? dist.base + 1 : dist.base;
+            int send_count = send_rows * side_len;
+
+            if (rank == 0) {
+                memcpy(recv_buffer, &global_array[r_start * side_len],
+                       send_count * sizeof(int));
+            } else {
+                MPI_Send(&global_array[r_start * side_len], send_count, MPI_INT,
+                         rank, 0, MPI_COMM_WORLD);
+            }
+        }
+    } else {
+        MPI_Status status;
+
+        MPI_Recv(recv_buffer, count, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+
+        int actual_count;
+        MPI_Get_count(&status, MPI_INT, &actual_count);
+        if (actual_count != count) {
+            fprintf(stderr, "Rank %d: MPI_Recv mismatch! Expected %d, got %d\n",
+                    mpi.rank, count, actual_count);
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+    }
+
+    return count;
 }
+
+
 
 void transpose_square_matrix(Rows_t *local_rows, int side_len) {
 	mpi_info_t mpi = get_mpi_info();
@@ -156,16 +192,22 @@ void transpose_square_matrix(Rows_t *local_rows, int side_len) {
 	int total_send = 0;
 	int i, rank, col, row;
 
-	for (rank = 0; rank < mpi.size; rank++) {
-		send_counts[rank] = dist.row_count * (dist.base + dist.remainder);
-		send_displs[rank] = send_displs[rank - 1] + send_counts[rank - 1];
-		total_send += send_counts[rank];
-	}
-	send_counts[mpi.rank] = 0;
+    for (rank = 0; rank < mpi.size; rank++) {
+        row_dist_t rank_dist = get_row_distribution(side_len, rank, mpi.size);
+        send_counts[rank] = dist.row_count * rank_dist.row_count;
+
+        if (rank > 0) {  // Add this check
+            send_displs[rank] = send_displs[rank - 1] + send_counts[rank - 1];
+        }
+        total_send += send_counts[rank];
+    }
 
 	// Send/Recieve buffers
 	int *send_buffer = malloc(total_send * sizeof(int));
 	int *recv_buffer = malloc(total_send * sizeof(int));
+
+    assert(send_buffer != NULL && recv_buffer != NULL);
+
 
 	// send_idx[] keeps track of the current index to be populated in
 	// each
