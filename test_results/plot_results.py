@@ -8,6 +8,11 @@ def plot_strong_scalability(filename, ax):
     t1 = df.loc[df['procs'] == 1, 'time'].values[0]
     df['speedup'] = t1 / df['time']
 
+    # Print speedup values to console
+    print("Strong Scalability Speedup:")
+    for _, row in df.iterrows():
+        print(f"Procs={row['procs']}: Speedup={row['speedup']:.4f}")
+
     ax.plot(df['procs'], df['speedup'], marker='o', label='Measured Speedup', color='tab:blue')
     ax.plot(df['procs'], df['procs'], linestyle='--', label='Ideal Speedup', color='gray')  # Ideal line
 
@@ -21,12 +26,17 @@ def plot_strong_scalability(filename, ax):
 
     plt.tight_layout()
 
-def plot_weak_scalability(filename,ax):
+def plot_weak_scalability(filename, ax):
     df = pd.read_csv(filename)
     df = df.sort_values('procs')
 
     t1 = df.loc[df['procs'] == 1, 'time'].values[0]
     df['efficiency'] = t1 / df['time']
+
+    # Print efficiency values to console
+    print("\nWeak Scalability Efficiency:")
+    for _, row in df.iterrows():
+        print(f"Procs={row['procs']}: Efficiency={row['efficiency']:.4f}")
 
     ax.plot(df['procs'], df['efficiency'], marker='x', color='tab:red', label='Efficiency')
 
@@ -42,12 +52,13 @@ def plot_weak_scalability(filename,ax):
     plt.tight_layout()
 
 if __name__ == "__main__":
-    strong_file = 'strong_scalability_results.txt'
-    weak_file = 'weak_scalability_results.txt'
+    strong_file = 'strong_scal.txt'
+    weak_file = 'weak_scal.txt'
     
     fig1, ax1 = plt.subplots()
     plot_strong_scalability(strong_file, ax1)
 
     fig2, ax2 = plt.subplots()
-    plot_weak_scalability(weak_file,ax2)
+    plot_weak_scalability(weak_file, ax2)
+
     plt.show()

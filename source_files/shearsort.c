@@ -23,16 +23,13 @@ mpi_info_t get_mpi_info() {
 
 void shearsort(int *local_rows, int side_len) {
 	mpi_info_t mpi = get_mpi_info();
-
-	// Instead of 4 calculations, just:
 	row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
 	int k, i, global_row;
 	int *row_start;
 	const int d = (int)ceil(log2(side_len * side_len));
 	for (k = 0; k < d + 1; k++) {
-
-		// ====== Sort Rows ======
+		// ====== Row Sort Phase ======
 		for (i = 0; i < dist.row_count; i++) {
 			global_row = dist.start_row + i;
 			row_start = &local_rows[i * side_len];
@@ -42,8 +39,7 @@ void shearsort(int *local_rows, int side_len) {
 				qsort(row_start, side_len, sizeof(int), compare_desc);
 			}
 		}
-
-		// ====== Sort Columns ======
+		// ====== Column Sort Phase ======
 		// Transpose (rows => cols)
 		transpose_square_matrix(local_rows, side_len);
 
@@ -127,7 +123,6 @@ void gather_rows(int *global_array, int side_len, int *my_rows) {
 
 int distribute_rows(int *global_array, int side_len, int **my_rows) {
     mpi_info_t mpi = get_mpi_info();
-
     row_dist_t dist = get_row_distribution(side_len, mpi.rank, mpi.size);
 
     int count = dist.row_count * side_len;

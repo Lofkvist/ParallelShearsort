@@ -24,7 +24,7 @@ fi
 
 for cores in "${CORES[@]}"; do
   echo "Testing strong scaling with $cores cores..."
-  execution_time=$(mpirun -n "$cores" ./shearsort "$INPUT_FILE")
+  execution_time=$(mpirun -n "$cores" ../shearsort "$INPUT_FILE")
   if [ $? -ne 0 ]; then
     echo "Run failed for $cores cores during strong scaling. Skipping..."
     continue
@@ -66,7 +66,7 @@ for cores in "${!WEAK_CONFIG[@]}"; do
     continue
   fi
 
-  execution_time=$(mpirun -n "$cores" ./shearsort "$input_file")
+  execution_time=$(mpirun -n "$cores" ../shearsort "$input_file")
   if [ $? -ne 0 ]; then
     echo "Run failed for $cores cores during weak scaling. Skipping..."
     continue
