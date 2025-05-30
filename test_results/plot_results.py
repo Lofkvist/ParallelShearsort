@@ -1,64 +1,45 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 
-def plot_strong_scalability(filename, ax):
+def plot_strong_efficiency(filename, ax):
     df = pd.read_csv(filename)
-    df = df.sort_values('procs')
-
-    t1 = df.loc[df['procs'] == 1, 'time'].values[0]
-    df['speedup'] = t1 / df['time']
-
-    # Print speedup values to console
-    print("Strong Scalability Speedup:")
-    for _, row in df.iterrows():
-        print(f"Procs={row['procs']}: Speedup={row['speedup']:.4f}")
-
-    ax.plot(df['procs'], df['speedup'], marker='o', label='Measured Speedup', color='tab:blue')
-    ax.plot(df['procs'], df['procs'], linestyle='--', label='Ideal Speedup', color='gray')  # Ideal line
-
-    ax.set_xlabel('Number of Processes', color='black')
-    ax.set_ylabel('Speedup', color='black')
-    ax.set_title('Strong Scalability', color='black')
-    ax.tick_params(axis='x', labelcolor='black')
-    ax.tick_params(axis='y', labelcolor='black')
-    ax.set_xticks(df['procs'])
-    ax.legend()
-
-    plt.tight_layout()
-
-def plot_weak_scalability(filename, ax):
-    df = pd.read_csv(filename)
-    df = df.sort_values('procs')
-
-    t1 = df.loc[df['procs'] == 1, 'time'].values[0]
-    df['efficiency'] = t1 / df['time']
-
-    # Print efficiency values to console
-    print("\nWeak Scalability Efficiency:")
-    for _, row in df.iterrows():
-        print(f"Procs={row['procs']}: Efficiency={row['efficiency']:.4f}")
-
-    ax.plot(df['procs'], df['efficiency'], marker='x', color='tab:red', label='Efficiency')
-
+    df = df.sort_values('proc')
+    
+    # Get unique problem sizes
+    problem_sizes = sorted(df['N'].unique())
+    
+    # Plot each problem size separately
+    for N in problem_sizes:
+        subset = df[df['N'] == N].copy()
+        subset = subset.sort_values('proc')
+        
+        # Calculate efficiency: speedup / number of processes
+        t1 = subset.loc[subset['proc'] == 1, 'time'].values[0]
+        subset['speedup'] = t1 / subset['time']
+        subset['efficiency'] = subset['speedup'] / subset['proc']
+        
+        # Plot this problem size
+        ax.plot(subset['proc'], subset['efficiency'], marker='^', 
+                label=f'N={N}', linewidth=2)
+    
+    # Add ideal efficiency line (should be 1.0)
+    ax.axhline(y=1.0, linestyle='--', color='gray', alpha=0.7, label='Ideal Efficiency')
+    
     ax.set_xlabel('Number of Processes', color='black')
     ax.set_ylabel('Efficiency', color='black')
-    ax.set_title('Weak Scalability', color='black')
-    ax.set_ylim(0, 1.05)
+    ax.set_title('Strong Efficiency', color='black', fontsize=14)
+    ax.set_ylim(0, 1.1)
     ax.tick_params(axis='x', labelcolor='black')
     ax.tick_params(axis='y', labelcolor='black')
-    ax.set_xticks(df['procs'])
+    ax.set_xticks(sorted(df['proc'].unique()))
     ax.legend()
-
-    plt.tight_layout()
+    ax.grid(True, alpha=0.3)
 
 if __name__ == "__main__":
     strong_file = 'strong_scal.txt'
-    weak_file = 'weak_scal.txt'
     
-    fig1, ax1 = plt.subplots()
-    plot_strong_scalability(strong_file, ax1)
-
-    fig2, ax2 = plt.subplots()
-    plot_weak_scalability(weak_file, ax2)
-
+    # Create figure for strong efficiency plot only
+    fig, ax = plt.subplots(figsize=(8, 6))
+    plot_strong_efficiency(strong_file, ax)
+    
     plt.show()

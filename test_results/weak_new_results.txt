@@ -1,9 +1,0 @@
-Weak Scalability Results - Constant work per core
-== 16 cores, N=4000 ==
-2.362275
-== 1 cores, N=1000 ==
-1.192147
-== 4 cores, N=2000 ==
-1.515020
-== 9 cores, N=3000 ==
-2.185840
