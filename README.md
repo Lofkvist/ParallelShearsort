@@ -43,16 +43,18 @@ mpirun -n <num_procs> ./shearsort <input_file>
 ```
 
 - `<num_procs>` is the number of processes used
-- `<input_file>` is a text file with one line, where the first number `n` denotes the side length of the matrix, followed by `n^2` integers to be sorted.
+- `<input_file>` is a text file with one line, where the first number `n` denotes the side length of the matrix, followed by `n^2` integers to be sorted (inputs are provided in directory `inputs` with varying `n`)
 
 ## Example input file
 
 ```
 4 16 2 3 13 5 11 10 8 9 7 6 12 4 14 15 1
 ```
-
+The program writes the execution time of the slowest process to standard output as a `float`
 ## Requirements
 
 - MPI (e.g., OpenMPI or MPICH)
 - C compiler (e.g., `gcc`)
 - `make`
+
+Author: Carl Löfkvist
