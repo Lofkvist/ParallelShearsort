@@ -27,7 +27,7 @@ void shearsort(int *local_rows, int side_len) {
 
 	int k, i, global_row;
 	int *row_start;
-	const int d = (int)ceil(log2(side_len * side_len));
+	const int d = (int)ceil(log2(side_len));
 	for (k = 0; k < d + 1; k++) {
 		// ====== Row Sort Phase ======
 		for (i = 0; i < dist.row_count; i++) {
